@@ -1,23 +1,35 @@
 import sys
-import urllib2
+import dryscrape
 import re
 import json
+import threading
+from flask import Flask, request
+
+
+app = Flask(__name__)
+
+ds_session = dryscrape.Session()
 
 from bs4 import BeautifulSoup
 
+jobs = {}
+
+next_job_id = 0
+
 def getSoup(link):
     try:
-        html_doc = urllib2.urlopen(link).read()
+        # html_doc = urllib2.urlopen(link).read()
+        ds_session.visit(link)
+        return BeautifulSoup(ds_session.body(), 'html.parser')
     except:
         return None
-    else:
-        return BeautifulSoup(html_doc, 'html.parser')
 
 class Crawler:
     linksUsed = []
 
-    def __init__(self, maxLevels):
+    def __init__(self, maxLevels, job_id):
         self.maxLevels = maxLevels
+        self.job_id = job_id
 
     def getLinks(self, soup):
         links = []
@@ -43,7 +55,7 @@ class Crawler:
         links = self.getLinks(soup)
         images = self.getImages(soup)
 
-        print '\t',link, level
+        print '\t'*(level-1),link
 
         obj = {}
         obj[link] = images
@@ -54,14 +66,52 @@ class Crawler:
                     obj[key] += arr
         return obj
 
-    def crawlAll(self, links, level = 1):
+    def crawlAll(self, links):
+        global jobs
+        print('Initiating Crawl', links, self.job_id)
         obj = {}
+        completed = 0
         for link in links:
-            for key, arr in self.crawl(link,level).iteritems():
+            for key, arr in self.crawl(link,1).iteritems():
                 obj.setdefault(key, [])
                 obj[key] += arr
-        return obj
+            completed += 1
+            jobs[self.job_id]['status']['completed'] = completed
+        jobs[self.job_id]['result'] = obj
+        return
 
-crawler = Crawler(2)
+@app.route("/jobs", methods=['POST'])   # ["http://reddit.com","http://blog.scrapinghub.com"]
+def create_job():
+    global jobs
+    global next_job_id
+    try:
+        links = json.loads(request.get_data())
+        job_id = next_job_id
+        # job_id = 0
+        next_job_id += 1
+        jobs[job_id] = { 'status':{'completed':0, 'inprogress':len(links)} , 'result':None}
 
-print json.dumps(crawler.crawlAll(sys.argv[1:]), sort_keys=True, indent=4)
+        crawler = Crawler(2, job_id)
+        t = threading.Thread(target=crawler.crawlAll, args =[links])
+        t.daemon = True
+        t.start()
+        return str(job_id), 202
+    except ValueError:
+        return 'Bad JSON', 400
+    except:
+        return 'Error', 500
+
+@app.route('/jobs/<int:job_id>/status', methods=['GET'])
+def show_job_status(job_id):
+    global jobs
+    return json.dumps(jobs[job_id]['status'], sort_keys=True, indent=2)
+
+@app.route('/jobs/<int:job_id>', methods=['GET'])
+def show_job_result(job_id):
+    global jobs
+    return json.dumps({'id':job_id, 'domains':jobs[job_id]['result']}, sort_keys=True, indent=2)
+
+if __name__ == "__main__":
+    app.run(debug = False)
+
+# print json.dumps(crawler.crawlAll(sys.argv[1:]), sort_keys=True, indent=4)
