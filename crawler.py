@@ -1,5 +1,5 @@
 import sys
-import dryscrape
+import urllib2
 import re
 import json
 import threading
@@ -7,8 +7,6 @@ from flask import Flask, request
 
 
 app = Flask(__name__)
-
-ds_session = dryscrape.Session()
 
 from bs4 import BeautifulSoup
 
@@ -18,9 +16,8 @@ next_job_id = 0
 
 def getSoup(link):
     try:
-        # html_doc = urllib2.urlopen(link).read()
-        ds_session.visit(link)
-        return BeautifulSoup(ds_session.body(), 'html.parser')
+        html_doc = urllib2.urlopen(link).read()
+        return BeautifulSoup(html_doc, 'html.parser')
     except:
         return None
 
